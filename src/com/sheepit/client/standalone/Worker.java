@@ -25,9 +25,6 @@ import static org.kohsuke.args4j.ExampleMode.REQUIRED;
 import org.kohsuke.args4j.Option;
 
 import java.io.File;
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.Authenticator;
 import java.net.MalformedURLException;
@@ -36,6 +33,11 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.LinkedList;
+import java.lang.reflect.Field;
+import java.lang.reflect.Type;
+import java.io.FileInputStream;
+import java.io.BufferedInputStream;
+import java.util.Properties;
 import com.sheepit.client.Client;
 import com.sheepit.client.Configuration;
 import com.sheepit.client.Configuration.ComputeType;
@@ -49,19 +51,19 @@ import com.sheepit.client.network.ProxyAuthenticator;
 
 public class Worker {
 	@Option(name = "-server", usage = "Render-farm server, default https://www.sheepit-renderfarm.com", metaVar = "URL", required = false)
-	private String server = "https://www.sheepit-renderfarm.com";
+	private String server = null; 
 	
 	@Option(name = "-login", usage = "User's login", metaVar = "LOGIN", required = false)
-	private String login = "";
+	private String login = null;
 	
 	@Option(name = "-password", usage = "User's password", metaVar = "PASSWORD", required = false)
-	private String password = "";
+	private String password = null;
 	
 	@Option(name = "-cache-dir", usage = "Cache/Working directory. Caution, everything in it not related to the render-farm will be removed", metaVar = "/tmp/cache", required = false)
 	private String cache_dir = null;
 	
 	@Option(name = "-max-uploading-job", usage = "", metaVar = "1", required = false)
-	private int max_upload = -1;
+	private Integer max_upload = null;
 	
 	@Option(name = "-gpu", usage = "CUDA name of the GPU used for the render, for example CUDA_0", metaVar = "CUDA_0", required = false)
 	private String gpu_device = null;
@@ -70,10 +72,10 @@ public class Worker {
 	private String method = null;
 	
 	@Option(name = "-cores", usage = "Number of core/thread to use for the render", metaVar = "3", required = false)
-	private int nb_cores = -1;
+	private Integer nb_cores = null;
 	
 	@Option(name = "--verbose", usage = "Display log", required = false)
-	private boolean print_log = false;
+	private Boolean print_log = null;
 	
 	@Option(name = "-request-time", usage = "H1:M1-H2:M2,H3:M3-H4:M4 Use the 24h format. For example to request job between 2am-8.30am and 5pm-11pm you should do --request-time 2:00-8:30,17:00-23:00 Caution, it's the requesting job time to get a project not the working time", metaVar = "2:00-8:30,17:00-23:00", required = false)
 	private String request_time = null;
@@ -85,13 +87,66 @@ public class Worker {
 	private String extras = null;
 	
 	@Option(name = "-ui", usage = "Specify the user interface to you use, default 'text', available 'oneline', 'text'", required = false)
-	private String ui_type = "text";
+	private String ui_type = null;
 	
 	@Option(name = "--version", usage = "Display application version", required = false)
-	private boolean display_version = false;
+	private Boolean display_version = null;
 
-	@Option(name = "-password-file", usage="Specify a file with the username and passwort in it, divided by a space character", required = false)
-	private String password_file = null;
+	@Option(name = "-config", usage="Specify a config file with the options in it", required = false)
+	private String config_file = null;
+
+
+	private void parseConfigFile() {
+		try {
+			Properties properties = new Properties();
+			BufferedInputStream stream = new BufferedInputStream(
+					new FileInputStream(config_file)
+			);
+			properties.load(stream);
+
+			try {
+				for (Field field: Worker.class.getDeclaredFields()) {
+					Option o = field.getAnnotation(Option.class);
+					if (o != null) {
+
+						String name = o.name().replaceAll("^-+", "");
+						if (name.equals("config")) {
+							// there is no sense in having a config value in the settings
+							continue;
+						}
+						if (field.get(this) != null) {
+							// let's not overwrite the command line args
+							System.out.println("Ignoring " + name +
+									" in config file because of the command line option");
+							continue;
+						}
+						String setting = properties.getProperty(name);
+
+						if (setting != null) {
+							Type type = field.getType();
+							if (type == String.class) {
+								field.set(this, setting);
+							}
+							else if (type == Integer.class) {
+								field.set(this, Integer.parseInt(setting));
+							}
+							else if (type == Boolean.class) {
+								field.set(this, Boolean.valueOf(setting));
+							}
+						}
+					}
+				}
+			}
+			catch (IllegalAccessException e) {
+				System.err.println(e.getMessage());
+				System.exit(2);
+			}
+		}
+		catch (IOException e) {
+			System.err.println(e.getMessage());
+			System.exit(2);
+		}
+	}
 	
 	public static void main(String[] args) {
 		new Worker().doMain(args);
@@ -110,57 +165,27 @@ public class Worker {
 			System.err.println("Example: java " + this.getClass().getName() + " " + parser.printExample(REQUIRED));
 			return;
 		}
+
+		if (config_file != null) {
+			parseConfigFile();
+		}
 		
-		if (display_version) {
+		if (display_version != null && display_version) {
 			Configuration config = new Configuration(null, "", "");
 			System.out.println("Version: " + config.getJarVersion());
 			return;
 		}
 		
-		if (password_file != null) {
-			BufferedReader reader = null;
-			try {
-				reader = new BufferedReader(new FileReader(password_file));
-				String text = null;
-				text = reader.readLine();
-				String[] parts = text.split("\\s+");
-				login = parts[0];
-				password = parts[1];
-			}
-			catch (FileNotFoundException e) {
-				System.err.println("Error: password file '" + password_file + "' was not found");
-				System.exit(2);
-			}
-			catch (IOException e) {
-				System.err.println("Error in reading the password file");
-				System.exit(2);
-			}
-			finally {
-				try {
-					if (reader != null) {
-						reader.close();
-					}
-				} catch (IOException e) {
-				}
-			}
-		}
-		else {
-			if (login.equals("")) {
-				System.err.println("No login name given");
-				parser.printUsage(System.err);
-				System.exit(2);
-			}
-			if (password.equals("")) {
-				System.err.println("No password given");
-				parser.printUsage(System.err);
-				System.exit(2);
-			}
-		}
-
-		
 		ComputeType compute_method = ComputeType.CPU_GPU;
 		Configuration config = new Configuration(null, login, password);
-		config.setPrintLog(print_log);
+
+		if (server == null) {
+			server = "https://www.sheepit-renderfarm.com";
+		}
+
+		if (print_log != null && print_log) {
+			config.setPrintLog(print_log);
+		}
 		
 		if (cache_dir != null) {
 			File a_dir = new File(cache_dir);
@@ -169,7 +194,7 @@ public class Worker {
 			}
 		}
 		
-		if (max_upload != -1) {
+		if (max_upload != null) {
 			if (max_upload <= 0) {
 				System.err.println("Error: max upload should be a greater than zero");
 				return;
@@ -231,12 +256,14 @@ public class Worker {
 			}
 		}
 		
-		if (nb_cores < -1) {
-			System.err.println("Error: use-number-core should be a greater than zero");
-			return;
-		}
-		else {
-			config.setUseNbCores(nb_cores);
+		if (nb_cores != null ) {
+			if (nb_cores < -1) {
+				System.err.println("Error: use-number-core should be a greater than zero");
+				return;
+			}
+			else {
+				config.setUseNbCores(nb_cores);
+			}
 		}
 		
 		if (method != null) {
@@ -300,7 +327,7 @@ public class Worker {
 		Log.getInstance(config).debug("client version " + config.getJarVersion());
 		
 		Gui gui;
-		if (ui_type.equals("oneline")) {
+		if (ui_type != null && ui_type.equals("oneline")) {
 			if (config.getPrintLog()) {
 				System.out.println("OneLine ui can not be used if the verbose mode is enable");
 				System.exit(2); 
