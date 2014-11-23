@@ -177,6 +177,17 @@ public class Worker {
 			System.out.println("Version: " + config.getJarVersion());
 			return;
 		}
+
+		if (login == null) {
+			System.err.println("No login name given");
+			parser.printUsage(System.err);
+			System.exit(2);
+		}
+		if (password == null) {
+			System.err.println("No password given");
+			parser.printUsage(System.err);
+			System.exit(2);
+		}
 		
 		ComputeType compute_method = ComputeType.CPU_GPU;
 		Configuration config = new Configuration(null, login, password);
