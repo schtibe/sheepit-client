@@ -92,7 +92,9 @@ public class Worker {
 	@Option(name = "--version", usage = "Display application version", required = false)
 	private Boolean display_version = null;
 
-	@Option(name = "-config", usage="Specify a config file with the options in it", required = false)
+	@Option(name = "-config", usage="Specify a config file with the options in it\n" +
+			"The command line options can be put in the file like this:\n" +
+			"login=USERNAME\npassword=PASSWORD\ncompute-method=GPU\n....", required = false)
 	private String config_file = null;
 
 
